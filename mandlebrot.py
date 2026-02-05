@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 """
 Mandelbrot Set Generator
@@ -48,8 +49,15 @@ def compute_mandelbrot():
     # I don't know why the grid still has complex numbers. They should all be replaced with integers
     complex_grid = complex_grid.astype(int)
 
-    plt.imshow(complex_grid)
-    plt.title('Mandelbrot set')
-    plt.show()
+    return complex_grid
 
-compute_mandelbrot()
+start_time = time.time()
+mandelbrot_result = compute_mandelbrot()
+elapsed_time = time.time() - start_time
+print(f'Computation took {elapsed_time:.3f} seconds')
+
+plt.imshow(mandelbrot_result)
+plt.title('Mandelbrot set')
+plt.colorbar()
+plt.savefig()
+# plt.show()
