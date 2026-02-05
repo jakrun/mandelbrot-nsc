@@ -17,5 +17,6 @@ def f(x) :
     Output value
     """
     # TODO : Implement the algorithm
+    # TODO : Another todo...
     pass
 
