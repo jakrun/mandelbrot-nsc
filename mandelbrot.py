@@ -10,8 +10,9 @@ Author : [Jakob Rundlett]
 Course : Numerical Scientific Computing 2026
 """
 
-def benchmark(func, *args, n_runs=5) :
+def benchmark(func, *args, n_runs=3) :
     """ Time func, return median of n_runs."""
+    print(f'Running {func.__name__} {n_runs}x...')
     times = []
     for _ in range(n_runs):
         t0 = time.perf_counter()
@@ -19,7 +20,8 @@ def benchmark(func, *args, n_runs=5) :
         times.append(time.perf_counter()-t0)
     median_t = statistics.median(times)
     # print(f"Median: {median_t:.4f}s" f"(min={min(times):.4f}, max={max(times):.4f})")
-    return median_t, result
+    print(f'{func.__name__} computation took {median_t:.3f} seconds')
+    return result
 
 def compute_mandelbrot_naive(x_min, x_max, x_res, y_min, y_max, y_res, max_iter):
     # for 1024x1024    
@@ -80,68 +82,92 @@ def compute_mandelbrot_numpy(x_min, x_max, x_res, y_min, y_max, y_res, max_iter)
         M[mask] += 1
     return M
 
-def test_row():
+run_tests = False
+if run_tests:
+    def test_row(N, A):
+        for i in range(N): s = np.sum(A[i, :])
+        return None
+
+    def test_col(N, A):
+        for j in range(N): s = np.sum(A[:, j])
+        return None
+
     N = 10000
     A = np.random.rand(N, N)
-    for i in range(N): s = np.sum(A[i, :])
+    A_f = np.asfortranarray(A)
+    n_runs = 3
+    print('With standard np.array ...')
+    _ = benchmark(test_row, N, A, n_runs=n_runs)
+    _ = benchmark(test_col, N, A, n_runs=n_runs)
+    print('With fortran np.array ...')
+    _ = benchmark(test_row, N, A_f, n_runs=n_runs)
+    _ = benchmark(test_col, N, A_f, n_runs=n_runs)
 
-def test_col():
-    N = 10000
-    A = np.random.rand(N, N)
-    for j in range(N): s = np.sum(A[:, j])
-
-gen_res = 1024
-max_iter = 100
-n_runs = 3
-
-print(f'Running naive version {n_runs}x...')
-naive_time, naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-print(f'Naive computation took {naive_time:.3f} seconds')
-
-print(f'Running numpy version {n_runs}x...')
-numpy_time, numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-print(f'Numpy computation took {numpy_time:.3f} seconds')
-
-check_diff = True
-save_image = True
-view_pair = False
-
-# check the strict numerical difference between the results
-if check_diff:
-    if np.allclose(naive_result, numpy_result):
-        print("Results match!")
-    else:
-        print("Results differ!")
-        diff = np.abs(naive_result - numpy_result)
-        print(f"Max difference: {diff.max()}")
-        print(f"Different pixels: {(diff > 0).sum()}")
-
-# plot the results next to each other
-if view_pair:
-    # Create subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-
-    # Display the Mandelbrot set
-    ax1.imshow(numpy_result)
-    ax1.set_title('Mandelbrot Set')
-    ax1.axis('off')  # Hide axes if desired
-
-    # Display the naive results
-    ax2.imshow(naive_result)
-    ax2.set_title('Naive Results')
-    ax2.axis('off')  # Hide axes if desired
-
-    # Show the plots
-    plt.tight_layout()
-    if save_image:
-        plt.savefig('mandelbrotFigurePair')
-    else:
-        plt.show()
 else:
-    plt.imshow(numpy_result)
-    plt.title('Mandelbrot set')
-    plt.colorbar()
-    if save_image:
-        plt.savefig('mandelbrotFigure')
-    else:
-        plt.show()
+    gen_res = 1024
+    max_iter = 100
+    n_runs = 3
+
+    run_naive_version = False
+    run_numpy_version = True
+    view_image = False
+    save_image = True
+
+    if run_naive_version and run_numpy_version:
+        naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+        numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+        
+        # check the strict numerical difference between the results
+        if np.allclose(naive_result, numpy_result):
+            print("Results match!")
+        else:
+            print("Results differ!")
+            diff = np.abs(naive_result - numpy_result)
+            print(f"Max difference: {diff.max()}")
+            print(f"Different pixels: {(diff > 0).sum()} ({(((diff > 0).sum()/(gen_res**2))*100):.1f}%)")
+
+        # plot the results next to each other
+        if view_image or save_image:
+            # Create subplots
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+            # Display the Mandelbrot set
+            ax1.imshow(numpy_result)
+            ax1.set_title('Numpy Result')
+            ax1.axis('off')  # Hide axes if desired
+
+            # Display the naive results
+            ax2.imshow(naive_result)
+            ax2.set_title('Naive Result')
+            ax2.axis('off')  # Hide axes if desired
+
+            # Show the plots
+            plt.tight_layout()
+            if save_image:
+                plt.savefig('mandelbrotFigure')
+            if view_image:
+                plt.show()
+
+    elif run_naive_version:
+        naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+        
+        if view_image or save_image:
+            plt.imshow(naive_result)
+            plt.title('Naive Result')
+            plt.colorbar()
+            if save_image:
+                plt.savefig('mandelbrotFigure')
+            if view_image:
+                plt.show()
+    
+    elif run_numpy_version:
+        numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+
+        if view_image or save_image:
+            plt.imshow(numpy_result)
+            plt.title('Numpy Result')
+            plt.colorbar()
+            if save_image:
+                plt.savefig('mandelbrotFigure')
+            if view_image:
+                plt.show()
