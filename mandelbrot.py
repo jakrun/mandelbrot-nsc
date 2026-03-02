@@ -21,7 +21,7 @@ def benchmark(func, *args, n_runs=3) :
     median_t = statistics.median(times)
     # print(f"Median: {median_t:.4f}s" f"(min={min(times):.4f}, max={max(times):.4f})")
     print(f'{func.__name__} computation took {median_t:.3f} seconds')
-    return result
+    return median_t, result
 
 def compute_mandelbrot_naive(x_min, x_max, x_res, y_min, y_max, y_res, max_iter):
     # for 1024x1024    
@@ -97,25 +97,26 @@ if run_tests:
     A_f = np.asfortranarray(A)
     n_runs = 3
     print('With standard np.array ...')
-    _ = benchmark(test_row, N, A, n_runs=n_runs)
-    _ = benchmark(test_col, N, A, n_runs=n_runs)
+    _, _ = benchmark(test_row, N, A, n_runs=n_runs)
+    _, _ = benchmark(test_col, N, A, n_runs=n_runs)
     print('With fortran np.array ...')
-    _ = benchmark(test_row, N, A_f, n_runs=n_runs)
-    _ = benchmark(test_col, N, A_f, n_runs=n_runs)
+    _, _ = benchmark(test_row, N, A_f, n_runs=n_runs)
+    _, _ = benchmark(test_col, N, A_f, n_runs=n_runs)
 
 else:
-    gen_res = 1024
+    gen_res = [256, 512, 1024, 2048, 4096]
     max_iter = 100
     n_runs = 3
 
     run_naive_version = False
     run_numpy_version = True
     view_image = False
-    save_image = True
+    save_image = False
+    plot_times = True
 
     if run_naive_version and run_numpy_version:
-        naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-        numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+        _, naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+        _, numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
         
         # check the strict numerical difference between the results
         if np.allclose(naive_result, numpy_result):
@@ -149,7 +150,7 @@ else:
                 plt.show()
 
     elif run_naive_version:
-        naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+        _, naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
         
         if view_image or save_image:
             plt.imshow(naive_result)
@@ -161,13 +162,23 @@ else:
                 plt.show()
     
     elif run_numpy_version:
-        numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
 
-        if view_image or save_image:
-            plt.imshow(numpy_result)
-            plt.title('Numpy Result')
-            plt.colorbar()
-            if save_image:
-                plt.savefig('mandelbrotFigure')
-            if view_image:
-                plt.show()
+        if plot_times:
+            res_times = []
+            for new_res in gen_res:
+                new_time, numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, new_res, -1.5, 1.5, new_res, max_iter, n_runs=n_runs)
+                res_times.append(new_time)
+            print(res_times)
+
+        else:
+            _, numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+
+            if view_image or save_image:
+                plt.imshow(numpy_result)
+                plt.title('Numpy Result')
+                plt.colorbar()
+                if save_image:
+                    plt.savefig('mandelbrotFigure')
+                if view_image:
+                    plt.show()
+
