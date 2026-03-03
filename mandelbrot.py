@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import time
 import statistics
 import warnings
+import numba
+import cProfile
+import pstats
 
 """
 Mandelbrot Set Generator
@@ -82,37 +85,49 @@ def compute_mandelbrot_numpy(x_min, x_max, x_res, y_min, y_max, y_res, max_iter)
         M[mask] += 1
     return M
 
-run_tests = False
+run_tests = 2
 if run_tests:
-    def test_row(N, A):
-        for i in range(N): s = np.sum(A[i, :])
-        return None
+    if run_tests == 1:
+        def test_row(N, A):
+            for i in range(N): s = np.sum(A[i, :])
+            return None
 
-    def test_col(N, A):
-        for j in range(N): s = np.sum(A[:, j])
-        return None
+        def test_col(N, A):
+            for j in range(N): s = np.sum(A[:, j])
+            return None
 
-    N = 10000
-    A = np.random.rand(N, N)
-    A_f = np.asfortranarray(A)
-    n_runs = 3
-    print('With standard np.array ...')
-    _, _ = benchmark(test_row, N, A, n_runs=n_runs)
-    _, _ = benchmark(test_col, N, A, n_runs=n_runs)
-    print('With fortran np.array ...')
-    _, _ = benchmark(test_row, N, A_f, n_runs=n_runs)
-    _, _ = benchmark(test_col, N, A_f, n_runs=n_runs)
+        N = 10000
+        A = np.random.rand(N, N)
+        A_f = np.asfortranarray(A)
+        n_runs = 3
+        print('With standard np.array ...')
+        _, _ = benchmark(test_row, N, A, n_runs=n_runs)
+        _, _ = benchmark(test_col, N, A, n_runs=n_runs)
+        print('With fortran np.array ...')
+        _, _ = benchmark(test_row, N, A_f, n_runs=n_runs)
+        _, _ = benchmark(test_col, N, A_f, n_runs=n_runs)
+    
+    elif run_tests == 2:
+        # x_min, x_max, x_res, y_min, y_max, y_res, max_iter
+        cProfile.run('compute_mandelbrot_naive(-2, 1, 1024, -1.5, 1.5, 1024, 100)', 'naive_profile.prof')
+        cProfile.run('compute_mandelbrot_numpy(-2, 1, 1024, -1.5, 1.5, 1024, 100)', 'numpy_profile.prof')
+
+        for name in ('naive_profile.prof', 'numpy_profile.prof'):
+            stats = pstats.Stats(name)
+            stats.sort_stats('cumulative')
+            stats.print_stats(10)
 
 else:
-    gen_res = [256, 512, 1024, 2048, 4096]
+    # gen_res = [256, 512, 1024, 2048, 4096]
+    gen_res = 2048
     max_iter = 100
-    n_runs = 3
+    n_runs = 5
 
-    run_naive_version = False
+    run_naive_version = True
     run_numpy_version = True
     view_image = False
     save_image = False
-    plot_times = True
+    plot_times = False
 
     if run_naive_version and run_numpy_version:
         _, naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
