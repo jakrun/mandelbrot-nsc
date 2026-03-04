@@ -134,7 +134,7 @@ def compute_mandelbrot_hybrid_numba(x_min, x_max, x_res, y_min, y_max, y_res, ma
     return np.rot90(complex_grid)
 
 @njit
-def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max_iter, dtype):
+def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max_iter, dtype=np.float64):
     """Fully JIT-compiled Mandelbrot --- structure identical to naive."""
     x = np.linspace(x_min, x_max, x_res).astype(dtype)
     y = np.linspace(y_min, y_max, y_res).astype(dtype)
@@ -313,8 +313,19 @@ elif run_tests == 2:
         stats.print_stats(10)
 
 elif run_tests == 3:
-    for dtype in [np.float32, np.float64]:
-        print(f'running with precision {dtype}')
-        _, _ = benchmark(compute_mandelbrot_naive_numba, -2, 1, 2048, -1.5, 1.5, 2048, 100, dtype)
+    # for dtype in [np.float32, np.float64]:
+    #     print(f'running with precision {dtype}')
+    #     _, _ = benchmark(compute_mandelbrot_naive_numba, -2, 1, 2048, -1.5, 1.5, 2048, 100, dtype)
+
+    # r16 = compute_mandelbrot_naive_numba(-2, 1, 1024, -1.5, 1.5, 1024, dtype = np.float16)
+    r32 = compute_mandelbrot_naive_numba(-2, 1, 2048, -1.5, 1.5, 2048, 100, dtype = np.float32)
+    r64 = compute_mandelbrot_naive_numba(-2, 1, 2048, -1.5, 1.5, 2048, 100, dtype = np.float64)
+    fig, axes = plt.subplots(1, 2, figsize=(12,4))
+    for ax, result, title in zip(axes, [r32, r64],  ['float32', 'float64 (ref)']):
+        ax.imshow(result, cmap='hot')
+        ax.set_title(title); ax.axis('off')
+    plt.savefig('precision_comparison.png', dpi=150)
+    print(f"Max diff float32 vs float64: {np.abs(r32 - r64).max()}")
+    # print(f"Max diff float16 vs float64: {np.abs(r16 - r64).max()}")
 
 
