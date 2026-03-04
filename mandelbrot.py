@@ -134,12 +134,12 @@ def compute_mandelbrot_hybrid_numba(x_min, x_max, x_res, y_min, y_max, y_res, ma
     return np.rot90(complex_grid)
 
 @njit
-def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max_iter):
+def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max_iter, dtype):
     """Fully JIT-compiled Mandelbrot --- structure identical to naive."""
-    x = np.linspace(x_min, x_max, x_res)
-    y = np.linspace(y_min, y_max, y_res)
-    result = np.zeros((y_res, x_res), dtype = np.int32)
-    
+    x = np.linspace(x_min, x_max, x_res).astype(dtype)
+    y = np.linspace(y_min, y_max, y_res).astype(dtype)
+    result = np.zeros((y_res, x_res), dtype=np.int32)
+
     for i in range(y_res): # compiled loop
         for j in range(x_res): # compiled loop
             c = x[j] + 1j*y[i]
@@ -160,10 +160,10 @@ def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max
 # 1: check performance of row vs col sums for numpy
 # 2: check the profiles for the original functions
 
-run_tests = 0
+run_tests = 3
 if run_tests == 0:
     # gen_res = [256, 512, 1024, 2048, 4096]
-    gen_res = 1024
+    gen_res = 2048
     max_iter = 100
     n_runs = 5
 
@@ -177,112 +177,110 @@ if run_tests == 0:
     save_image = False
     plot_times = False
 
-    comparison = False
-    if run_version.count(True) >= 2:
-        comparison = True
-        versions = [compute_mandelbrot_naive, compute_mandelbrot_numpy, compute_mandelbrot_hybrid_numba, compute_mandelbrot_naive_numba]
-        func1 = None
-        func2 = None
-        for i in range(len(run_version)):
-            if run_version[i] and func1 == None:
-                func1 = versions[i]
-            elif run_version[i] and func2 == None:
-                func2 = versions[i]
+    versions = [compute_mandelbrot_naive, compute_mandelbrot_numpy, compute_mandelbrot_hybrid_numba, compute_mandelbrot_naive_numba]
+    if run_version.count(False) == 0:
+        for func in versions:
+            _, _ = benchmark(func, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+    else:
+        if run_version.count(True) >= 2:
+            func1 = None
+            func2 = None
+            for i in range(len(run_version)):
+                if run_version[i] and func1 == None:
+                    func1 = versions[i]
+                elif run_version[i] and func2 == None:
+                    func2 = versions[i]
 
-    if comparison:
-        _, func1_result = benchmark(func1, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-        _, func2_result = benchmark(func2, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+            _, func1_result = benchmark(func1, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+            _, func2_result = benchmark(func2, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+            
+            # check the strict numerical difference between the results
+            if np.allclose(func1_result, func2_result):
+                print("Results match!")
+            else:
+                print("Results differ!")
+                diff = np.abs(func1_result - func2_result)
+                print(f"Max difference: {diff.max()}")
+                print(f"Different pixels: {(diff > 0).sum()} ({(((diff > 0).sum()/(gen_res**2))*100):.1f}%)")
+
+            # plot the results next to each other
+            if view_image or save_image:
+                # Create subplots
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+                ax1.imshow(func1_result)
+                ax1.set_title(f'{func1.__name__} Result')
+                ax1.axis('off')
+
+                ax2.imshow(func2_result)
+                ax2.set_title(f'{func2.__name__} Result')
+                ax2.axis('off')
+
+                # Show/save the plots
+                plt.tight_layout()
+                if save_image:
+                    plt.savefig('mandelbrotFigure')
+                if view_image:
+                    plt.show()
+
+        elif run_naive:
+            _, naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+            
+            if view_image or save_image:
+                plt.imshow(naive_result)
+                plt.title('Naive Result')
+                plt.colorbar()
+                if save_image:
+                    plt.savefig('mandelbrotFigure')
+                if view_image:
+                    plt.show()
         
-        # check the strict numerical difference between the results
-        if np.allclose(func1_result, func2_result):
-            print("Results match!")
-        else:
-            print("Results differ!")
-            diff = np.abs(func1_result - func2_result)
-            print(f"Max difference: {diff.max()}")
-            print(f"Different pixels: {(diff > 0).sum()} ({(((diff > 0).sum()/(gen_res**2))*100):.1f}%)")
+        elif run_numpy:
 
-        # plot the results next to each other
-        if view_image or save_image:
-            # Create subplots
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+            if plot_times:
+                res_times = []
+                for new_res in gen_res:
+                    new_time, numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, new_res, -1.5, 1.5, new_res, max_iter, n_runs=n_runs)
+                    res_times.append(new_time)
+                print(res_times)
 
-            ax1.imshow(func1_result)
-            ax1.set_title(f'{func1.__name__} Result')
-            ax1.axis('off')
+            else:
+                _, numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
 
-            ax2.imshow(func2_result)
-            ax2.set_title(f'{func2.__name__} Result')
-            ax2.axis('off')
+                if view_image or save_image:
+                    plt.imshow(numpy_result)
+                    plt.title('Numpy Result')
+                    plt.colorbar()
+                    if save_image:
+                        plt.savefig('mandelbrotFigure')
+                    if view_image:
+                        plt.show()
 
-            # Show/save the plots
-            plt.tight_layout()
-            if save_image:
-                plt.savefig('mandelbrotFigure')
-            if view_image:
-                plt.show()
-
-    elif run_naive:
-        _, naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-        
-        if view_image or save_image:
-            plt.imshow(naive_result)
-            plt.title('Naive Result')
-            plt.colorbar()
-            if save_image:
-                plt.savefig('mandelbrotFigure')
-            if view_image:
-                plt.show()
-    
-    elif run_numpy:
-
-        if plot_times:
-            res_times = []
-            for new_res in gen_res:
-                new_time, numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, new_res, -1.5, 1.5, new_res, max_iter, n_runs=n_runs)
-                res_times.append(new_time)
-            print(res_times)
-
-        else:
-            _, numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+        elif run_hybrid_numba:
+            _, hybrid_numba_result = benchmark(compute_mandelbrot_hybrid_numba, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+            print('finished hybrid numba version...')
 
             if view_image or save_image:
-                plt.imshow(numpy_result)
-                plt.title('Numpy Result')
+                plt.imshow(hybrid_numba_result)
+                plt.title('Hybrid Numba Result')
                 plt.colorbar()
                 if save_image:
                     plt.savefig('mandelbrotFigure')
                 if view_image:
                     plt.show()
 
-    elif run_hybrid_numba:
-        print('running hybrid numba version...')
-        _, hybrid_numba_result = benchmark(compute_mandelbrot_hybrid_numba, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-        print('finished hybrid numba version...')
+        elif run_naive_numba:
+            _, naive_numba_result = benchmark(compute_mandelbrot_naive_numba, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+            print('finished naive numba version...')
 
-        if view_image or save_image:
-            plt.imshow(hybrid_numba_result)
-            plt.title('Hybrid Numba Result')
-            plt.colorbar()
-            if save_image:
-                plt.savefig('mandelbrotFigure')
-            if view_image:
-                plt.show()
-
-    elif run_naive_numba:
-        print('running naive numba version...')
-        _, naive_numba_result = benchmark(compute_mandelbrot_naive_numba, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-        print('finished naive numba version...')
-
-        if view_image or save_image:
-            plt.imshow(naive_numba_result)
-            plt.title('Naive Numba Result')
-            plt.colorbar()
-            if save_image:
-                plt.savefig('mandelbrotFigure')
-            if view_image:
-                plt.show()
-
+            if view_image or save_image:
+                plt.imshow(naive_numba_result)
+                plt.title('Naive Numba Result')
+                plt.colorbar()
+                if save_image:
+                    plt.savefig('mandelbrotFigure')
+                if view_image:
+                    plt.show()
 
 elif run_tests == 1:
     def test_row(N, A):
@@ -313,5 +311,10 @@ elif run_tests == 2:
         stats = pstats.Stats(name)
         stats.sort_stats('cumulative')
         stats.print_stats(10)
+
+elif run_tests == 3:
+    for dtype in [np.float32, np.float64]:
+        print(f'running with precision {dtype}')
+        _, _ = benchmark(compute_mandelbrot_naive_numba, -2, 1, 2048, -1.5, 1.5, 2048, 100, dtype)
 
 
