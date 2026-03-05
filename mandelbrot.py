@@ -11,6 +11,8 @@ import cProfile
 import pstats
 import math
 import random
+from multiprocessing import Pool
+import os
 
 """
 Mandelbrot Set Generator
@@ -153,15 +155,6 @@ def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max
             result [i, j] = n
     return result
 
-# def estimate_pi_serial(num_samples):
-#     hits = 0
-#     for _ in range(num_samples):
-#         x = np.random.rand() # random x-value in unit square
-#         y = np.random.rand() # random y-value in unit square
-#         if x*x + y*y <= 1.0: # check if inside unit circle
-#             hits += 1
-#     return (hits / num_samples) * 4.0
-
 def estimate_pi_serial(num_samples):
     inside_circle = 0
     for _ in range(num_samples):
@@ -170,14 +163,30 @@ def estimate_pi_serial(num_samples):
             inside_circle += 1
     return 4 * inside_circle / num_samples
 
+def estimate_pi_chunk(num_samples):
+    inside_circle = 0
+    for _ in range(num_samples):
+        x, y = random.random(), random.random()
+        if x*x + y*y <= 1:
+            inside_circle += 1
+    return inside_circle
+
+def estimate_pi_parallel(num_samples, num_processes=4):
+    samples_per_process = num_samples // num_processes
+    tasks = [samples_per_process] * num_processes
+    with Pool(processes=num_processes) as pool:
+        results = pool.map(estimate_pi_chunk, tasks)
+    return 4 * sum(results) / num_samples
+
 # -1: do nothing
 # 0: run the functions normally
 # 1: check performance of row vs col sums for numpy
 # 2: check the profiles for the original functions
 # 3: data type test
 # 4: Monte Carlo pi estimation test
+# 5: Monte Carlo pi estimation test *in parallel*
 
-run_tests = 4
+run_tests = 5
 if run_tests == 0:
     gen_res_list = [256, 512, 1024, 2048, 4096, 4096*2, 4096*4]
     gen_res = 4096*2
@@ -349,18 +358,20 @@ elif run_tests == 3:
 
 elif run_tests == 4:
     # First we check how long it takes to run the naive Monte Carlo with 10,000,000 samples
-    # num_samples = 10**7
-    # _, pi_estimate = benchmark(estimate_pi_serial, num_samples)
-    # print(f"Estimated pi with {num_samples} samples: {pi_estimate}")
+    num_samples = 10**7
+    _, pi_estimate = benchmark(estimate_pi_serial, num_samples)
+    print(f"Estimated pi with {num_samples} samples: {pi_estimate} (error: {abs(pi_estimate-math.pi):.6f})")
+    
+elif run_tests == 5:
+    # Now we do the same but for parellel computing
     if __name__ == '__main__':
-        num_samples = 10_000_000
-        times = []
-        for _ in range(3):
-            t0 = time.perf_counter()
-            pi_estimate = estimate_pi_serial(num_samples)
-            times.append(time.perf_counter() - t0)
-        t_serial = statistics.median(times)
-        print(f"pi estimate: {pi_estimate:.6f} (error: {abs(pi_estimate-math.pi):.6f})")
-        print(f"Serial time: {t_serial:.3f}s")
-
+        num_samples = 10**7
+        for num_proc in range(1, os.cpu_count() + 1):
+            times = []
+            for _ in range(3):
+                t0 = time.perf_counter()
+                pi_est = estimate_pi_parallel(num_samples, num_proc)
+                times.append(time.perf_counter() - t0)
+            t = statistics.median(times)
+            print(f"{num_proc:2d} workers: {t:.3f}s pi={pi_est:.6f}")
 
