@@ -3,11 +3,14 @@ import matplotlib.pyplot as plt
 import time
 import statistics
 import warnings
+import numba
 from numba import njit
 from numba import int32
 from numba import complex128
 import cProfile
 import pstats
+import math
+import random
 
 """
 Mandelbrot Set Generator
@@ -71,7 +74,6 @@ def compute_mandelbrot_naive(x_min, x_max, x_res, y_min, y_max, y_res, max_iter)
         warnings.simplefilter("ignore")
         complex_grid = complex_grid.astype(int)
 
-
     return np.rot90(complex_grid)
 
 def compute_mandelbrot_numpy(x_min, x_max, x_res, y_min, y_max, y_res, max_iter):
@@ -134,7 +136,7 @@ def compute_mandelbrot_hybrid_numba(x_min, x_max, x_res, y_min, y_max, y_res, ma
     return np.rot90(complex_grid)
 
 @njit
-def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max_iter, dtype=np.float64):
+def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max_iter, dtype=np.float32):
     """Fully JIT-compiled Mandelbrot --- structure identical to naive."""
     x = np.linspace(x_min, x_max, x_res).astype(dtype)
     y = np.linspace(y_min, y_max, y_res).astype(dtype)
@@ -151,21 +153,36 @@ def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max
             result [i, j] = n
     return result
 
-# compute_mandelbrot_naive(-2, 1, 2048, -1.5, 1.5, 2048, 100)
-# compute_mandelbrot_numpy(-2, 1, 2048, -1.5, 1.5, 2048, 100)
-# compute_mandelbrot_numba(-2, 1, 2048, -1.5, 1.5, 2048, 100)
+# def estimate_pi_serial(num_samples):
+#     hits = 0
+#     for _ in range(num_samples):
+#         x = np.random.rand() # random x-value in unit square
+#         y = np.random.rand() # random y-value in unit square
+#         if x*x + y*y <= 1.0: # check if inside unit circle
+#             hits += 1
+#     return (hits / num_samples) * 4.0
+
+def estimate_pi_serial(num_samples):
+    inside_circle = 0
+    for _ in range(num_samples):
+        x, y = random.random(), random.random()
+        if x*x + y*y <= 1:
+            inside_circle += 1
+    return 4 * inside_circle / num_samples
 
 # -1: do nothing
 # 0: run the functions normally
 # 1: check performance of row vs col sums for numpy
 # 2: check the profiles for the original functions
+# 3: data type test
+# 4: Monte Carlo pi estimation test
 
-run_tests = 3
+run_tests = 4
 if run_tests == 0:
-    # gen_res = [256, 512, 1024, 2048, 4096]
-    gen_res = 2048
-    max_iter = 100
-    n_runs = 5
+    gen_res_list = [256, 512, 1024, 2048, 4096, 4096*2, 4096*4]
+    gen_res = 4096*2
+    max_iter = 512
+    n_runs = 1
 
     run_naive = False
     run_numpy = False
@@ -173,8 +190,8 @@ if run_tests == 0:
     run_naive_numba = True
     run_version = [run_naive, run_numpy, run_hybrid_numba, run_naive_numba]
 
-    view_image = True
-    save_image = False
+    view_image = False
+    save_image = True
     plot_times = False
 
     versions = [compute_mandelbrot_naive, compute_mandelbrot_numpy, compute_mandelbrot_hybrid_numba, compute_mandelbrot_naive_numba]
@@ -270,15 +287,17 @@ if run_tests == 0:
                     plt.show()
 
         elif run_naive_numba:
-            _, naive_numba_result = benchmark(compute_mandelbrot_naive_numba, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+            _, naive_numba_result = benchmark(compute_mandelbrot_naive_numba, -1.5, 0.5, gen_res, -1, 1, gen_res, max_iter, n_runs=n_runs)
             print('finished naive numba version...')
 
             if view_image or save_image:
+                plt.figure(figsize=(10, 10))
+                plt.axis('off')
                 plt.imshow(naive_numba_result)
-                plt.title('Naive Numba Result')
-                plt.colorbar()
+                # plt.title('Naive Numba Result')
+                # plt.colorbar()
                 if save_image:
-                    plt.savefig('mandelbrotFigure')
+                    plt.savefig('mandelbrotFigure.png', dpi=gen_res/10)
                 if view_image:
                     plt.show()
 
@@ -327,5 +346,21 @@ elif run_tests == 3:
     plt.savefig('precision_comparison.png', dpi=150)
     print(f"Max diff float32 vs float64: {np.abs(r32 - r64).max()}")
     # print(f"Max diff float16 vs float64: {np.abs(r16 - r64).max()}")
+
+elif run_tests == 4:
+    # First we check how long it takes to run the naive Monte Carlo with 10,000,000 samples
+    # num_samples = 10**7
+    # _, pi_estimate = benchmark(estimate_pi_serial, num_samples)
+    # print(f"Estimated pi with {num_samples} samples: {pi_estimate}")
+    if __name__ == '__main__':
+        num_samples = 10_000_000
+        times = []
+        for _ in range(3):
+            t0 = time.perf_counter()
+            pi_estimate = estimate_pi_serial(num_samples)
+            times.append(time.perf_counter() - t0)
+        t_serial = statistics.median(times)
+        print(f"pi estimate: {pi_estimate:.6f} (error: {abs(pi_estimate-math.pi):.6f})")
+        print(f"Serial time: {t_serial:.3f}s")
 
 
