@@ -15,6 +15,7 @@ import random
 from multiprocessing import Pool
 import os
 import psutil
+from pathlib import Path
 
 """
 Mandelbrot Set Generator
@@ -22,7 +23,7 @@ Author : [Jakob Rundlett]
 Course : Numerical Scientific Computing 2026
 """
 
-# MP1:
+# MP1
 
 def benchmark(func, *args, n_runs=3) :
     """ Time func, return median of n_runs."""
@@ -142,7 +143,8 @@ def compute_mandelbrot_hybrid_numba(x_min, x_max, x_res, y_min, y_max, y_res, ma
     return np.rot90(complex_grid)
 
 @njit
-def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max_iter, dtype=np.float32):
+def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, 
+                                   y_max, y_res, max_iter, dtype=np.float32):
     """Fully JIT-compiled Mandelbrot --- structure identical to naive."""
     x = np.linspace(x_min, x_max, x_res).astype(dtype)
     y = np.linspace(y_min, y_max, y_res).astype(dtype)
@@ -159,7 +161,7 @@ def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, y_max, y_res, max
             result [i, j] = n
     return result
 
-# MP2:
+# MP2 exercises 1-3
 
 def estimate_pi_serial(num_samples):
     inside_circle = 0
@@ -184,6 +186,52 @@ def estimate_pi_parallel(num_samples, num_processes=4):
         results = pool.map(estimate_pi_chunk, tasks)
     return 4 * sum(results) / num_samples
 
+# MP2 milestone 1
+
+@njit
+def mandelbrot_pixel(c_real, c_imag, max_iter):
+    z_real = z_imag = 0.0
+    for i in range(max_iter):
+        zr2 = z_real*z_real
+        zi2 = z_imag*z_imag
+        if zr2 + zi2 > 4.0: return i
+        z_imag = 2.0*z_real*z_imag + c_imag
+        z_real = zr2 - zi2 + c_real
+    return max_iter
+
+@njit
+def mandelbrot_chunk(row_start, row_end, N, x_min, x_max, y_min, y_max, max_iter):
+    out = np.empty((row_end - row_start, N), dtype=np.int32)
+    dx = (x_max - x_min) / N
+    dy = (y_max - y_min) / N
+    for row in range(row_end - row_start):
+        c_imag = y_min + (row + row_start) * dy
+        for col in range(N):
+            out[row, col] = mandelbrot_pixel(x_min + col*dx, c_imag, max_iter)
+    return out
+
+def mandelbrot_serial(x_min, x_max, N1, y_min, y_max, N2, max_iter):
+    return mandelbrot_chunk(0, N1, N2, x_min, x_max, y_min, y_max, max_iter)
+
+# MP2 milestone 2
+
+def _worker(args):
+    return mandelbrot_chunk(*args)
+
+def mandelbrot_parallel(N, x_min, x_max, y_min, y_max, max_iter, n_workers=4):
+    chunk_size = max(1, N // n_workers)
+    chunks, row = [], 0
+    while row < N:
+        row_end = min(row + chunk_size, N)
+        chunks.append((row, row_end, N, x_min, x_max, y_min, y_max, max_iter))
+        row = row_end
+
+    with Pool(processes=n_workers) as pool:
+        pool.map(_worker, chunks)
+        parts = pool.map(_worker, chunks)
+    
+    return np.vstack(parts)
+
 # TEST CASES:
     # 0: do nothing
     # 1: run the functions normally
@@ -193,33 +241,39 @@ def estimate_pi_parallel(num_samples, num_processes=4):
     # 5: Monte Carlo pi estimation test
     # 6: Monte Carlo pi estimation test *in parallel*
 
-run_tests = 6
+run_tests = 1
 match run_tests:
-    case 0:
-        print("Doing nothing...")
-
+    case 0: print("Doing nothing...")
     case 1:
-        gen_res_list = [256, 512, 1024, 2048, 4096, 4096*2, 4096*4]
+        gen_res_list = [128, 256, 512, 1024, 2048, 4096, 4096*2, 4096*4]
         gen_res = 2048
-        max_iter = 100
+        max_iter = 256
         n_runs = 3
 
         run_naive = False
         run_numpy = False
         run_hybrid_numba = False
-        run_naive_numba = True
-        run_version = [run_naive, run_numpy, run_hybrid_numba, run_naive_numba]
+        run_naive_numba = False
+        run_serial = False
+        run_parallel = True
+        
+        run_version = [run_naive,        run_numpy, 
+                       run_hybrid_numba, run_naive_numba, 
+                       run_serial,       run_parallel]
 
-        view_image = False
-        save_image = True
-        plot_times = False
+        view_image = True
+        save_image = False
+        plot_times = False # only use if using gen_res_list
 
-        versions = [compute_mandelbrot_naive, compute_mandelbrot_numpy, compute_mandelbrot_hybrid_numba, compute_mandelbrot_naive_numba]
+        versions = [compute_mandelbrot_naive, compute_mandelbrot_numpy, 
+                    compute_mandelbrot_hybrid_numba, compute_mandelbrot_naive_numba, 
+                    mandelbrot_serial, mandelbrot_parallel]
         if run_version.count(False) == 0:
             for func in versions:
-                _, _ = benchmark(func, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+                _, _ = benchmark(func, -2, 1, gen_res, -1.5, 1.5, gen_res, 
+                                 max_iter, n_runs=n_runs)
         else:
-            if run_version.count(True) >= 2:
+            if run_version.count(True) > 1:
                 func1 = None
                 func2 = None
                 for i in range(len(run_version)):
@@ -260,62 +314,14 @@ match run_tests:
                     if view_image:
                         plt.show()
 
-            elif run_naive:
-                _, naive_result = benchmark(compute_mandelbrot_naive, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-                
-                if view_image or save_image:
-                    plt.imshow(naive_result)
-                    plt.title('Naive Result')
-                    plt.colorbar()
-                    if save_image:
-                        plt.savefig('mandelbrotFigure')
-                    if view_image:
-                        plt.show()
-            
-            elif run_numpy:
-
-                if plot_times:
-                    res_times = []
-                    for new_res in gen_res:
-                        new_time, numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, new_res, -1.5, 1.5, new_res, max_iter, n_runs=n_runs)
-                        res_times.append(new_time)
-                    print(res_times)
-
-                else:
-                    _, numpy_result = benchmark(compute_mandelbrot_numpy, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-
-                    if view_image or save_image:
-                        plt.imshow(numpy_result)
-                        plt.title('Numpy Result')
-                        plt.colorbar()
-                        if save_image:
-                            plt.savefig('mandelbrotFigure')
-                        if view_image:
-                            plt.show()
-
-            elif run_hybrid_numba:
-                _, hybrid_numba_result = benchmark(compute_mandelbrot_hybrid_numba, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-                print('finished hybrid numba version...')
-
-                if view_image or save_image:
-                    plt.imshow(hybrid_numba_result)
-                    plt.title('Hybrid Numba Result')
-                    plt.colorbar()
-                    if save_image:
-                        plt.savefig('mandelbrotFigure')
-                    if view_image:
-                        plt.show()
-
-            elif run_naive_numba:
-                _, naive_numba_result = benchmark(compute_mandelbrot_naive_numba, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-                print('finished naive numba version...')
+            else:
+                _, result = benchmark(versions[run_version.index(True)], -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+                print('finished version...')
 
                 if view_image or save_image:
                     plt.figure(figsize=(10, 10))
                     plt.axis('off')
-                    plt.imshow(naive_numba_result)
-                    # plt.title('Naive Numba Result')
-                    # plt.colorbar()
+                    plt.imshow(result)
                     if save_image:
                         plt.savefig('mandelbrotFigure.png', dpi=gen_res/10)
                     if view_image:
@@ -368,13 +374,17 @@ match run_tests:
         # print(f"Max diff float16 vs float64: {np.abs(r16 - r64).max()}")
 
     case 5:
-        # First we check how long it takes to run the naive Monte Carlo with 10,000,000 samples
+        # First we check how long it takes to run the naive Monte Carlo with 
+        # 10,000,000 samples
         num_samples = 10**7
         _, pi_estimate = benchmark(estimate_pi_serial, num_samples)
-        print(f"Estimated pi with {num_samples} samples: {pi_estimate} (error: {abs(pi_estimate-math.pi):.6f})")
+        print(f"Estimated pi with {num_samples} \
+              samples: {pi_estimate} \
+                (error: {abs(pi_estimate-math.pi):.6f})")
 
     case 6:
-        # Now we do the same but for parellel computing for every numper of worker count from 1 to cpu_count()
+        # Now we do the same but for parellel computing for every number of 
+        # worker-count from 1 to cpu_count()
         if __name__ == '__main__':
             num_samples = 10**7
             worker_times = {}
@@ -388,9 +398,22 @@ match run_tests:
                 # print(f"{num_proc:2d} workers: {t:.3f}s pi={pi_est:.6f}")
                 worker_times[num_proc] = t
                 speed_up = worker_times[1] / t if num_proc > 1 else 1
-                efficiency = speed_up / num_proc
-                print(f'{num_proc:2d} | {t:.3f} | {speed_up:.2f}) | {efficiency:.2f}')
-            
+                efficiency = (speed_up / num_proc)*100
+                print(f'{num_proc:2d} workers | \
+{t:.3f}s | {speed_up:.2f}x | \
+{efficiency:.1f}%')
 
+    case 7:
+        if __name__ == '__main__':
+            result = mandelbrot_parallel(1024, -2.5, 1.0, -1.25, 1.25, 100, n_workers=4)
+            
+            fig, ax = plt.subplots(figsize=(8, 6))
+            ax.imshow(result, extent=[-2.5, 1.0, -1.25, 1.25],
+                    cmap='inferno', origin='lower', aspect='equal')
+            ax.set_xlabel('Re(c)')
+            ax.set_ylabel('Im(c)')
+            out = Path(__file__).parent / 'mandelbrot.png'
+            fig.savefig(out, dpi=150)
+            print (f'Saved: {out}')
 
 
