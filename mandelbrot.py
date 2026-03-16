@@ -227,10 +227,14 @@ def mandelbrot_parallel(N, x_min, x_max, y_min, y_max, max_iter, n_workers=4):
         row = row_end
 
     with Pool(processes=n_workers) as pool:
-        pool.map(_worker, chunks)
+        pool.map(_worker, chunks) # un-timed warmup
         parts = pool.map(_worker, chunks)
     
     return np.vstack(parts)
+
+# MP2 milestone 3
+
+
 
 # TEST CASES:
     # 0: do nothing
@@ -240,8 +244,10 @@ def mandelbrot_parallel(N, x_min, x_max, y_min, y_max, max_iter, n_workers=4):
     # 4: data type test
     # 5: Monte Carlo pi estimation test
     # 6: Monte Carlo pi estimation test *in parallel*
+    # 7: run the parallel mandelbrot computation and save the image
+    # 8: run the serial mandelbrot computation and save the image
 
-run_tests = 1
+run_tests = 8
 match run_tests:
     case 0: print("Doing nothing...")
     case 1:
@@ -250,13 +256,13 @@ match run_tests:
         max_iter = 256
         n_runs = 3
 
-        run_naive = False
-        run_numpy = False
+        run_naive        = False
+        run_numpy        = False
         run_hybrid_numba = False
-        run_naive_numba = False
-        run_serial = False
-        run_parallel = True
-        
+        run_naive_numba  = False
+        run_serial       = False
+        run_parallel     = True
+
         run_version = [run_naive,        run_numpy, 
                        run_hybrid_numba, run_naive_numba, 
                        run_serial,       run_parallel]
@@ -268,64 +274,67 @@ match run_tests:
         versions = [compute_mandelbrot_naive, compute_mandelbrot_numpy, 
                     compute_mandelbrot_hybrid_numba, compute_mandelbrot_naive_numba, 
                     mandelbrot_serial, mandelbrot_parallel]
+        # run all the functions (idk what the point of this is)
         if run_version.count(False) == 0:
             for func in versions:
                 _, _ = benchmark(func, -2, 1, gen_res, -1.5, 1.5, gen_res, 
                                  max_iter, n_runs=n_runs)
-        else:
-            if run_version.count(True) > 1:
-                func1 = None
-                func2 = None
-                for i in range(len(run_version)):
-                    if run_version[i] and func1 == None:
-                        func1 = versions[i]
-                    elif run_version[i] and func2 == None:
-                        func2 = versions[i]
 
-                _, func1_result = benchmark(func1, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-                _, func2_result = benchmark(func2, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-                
-                # check the strict numerical difference between the results
-                if np.allclose(func1_result, func2_result):
-                    print("Results match!")
-                else:
-                    print("Results differ!")
-                    diff = np.abs(func1_result - func2_result)
-                    print(f"Max difference: {diff.max()}")
-                    print(f"Different pixels: {(diff > 0).sum()} ({(((diff > 0).sum()/(gen_res**2))*100):.1f}%)")
+        # compare the first two versions
+        elif run_version.count(True) > 1:
+            func1 = None
+            func2 = None
+            for i in range(len(run_version)):
+                if run_version[i] and func1 == None:
+                    func1 = versions[i]
+                elif run_version[i] and func2 == None:
+                    func2 = versions[i]
 
-                # plot the results next to each other
-                if view_image or save_image:
-                    # Create subplots
-                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-
-                    ax1.imshow(func1_result)
-                    ax1.set_title(f'{func1.__name__} Result')
-                    ax1.axis('off')
-
-                    ax2.imshow(func2_result)
-                    ax2.set_title(f'{func2.__name__} Result')
-                    ax2.axis('off')
-
-                    # Show/save the plots
-                    plt.tight_layout()
-                    if save_image:
-                        plt.savefig('mandelbrotFigure')
-                    if view_image:
-                        plt.show()
-
+            _, func1_result = benchmark(func1, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+            _, func2_result = benchmark(func2, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+            
+            # check the strict numerical difference between the results
+            if np.allclose(func1_result, func2_result):
+                print("Results match!")
             else:
-                _, result = benchmark(versions[run_version.index(True)], -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-                print('finished version...')
+                print("Results differ!")
+                diff = np.abs(func1_result - func2_result)
+                print(f"Max difference: {diff.max()}")
+                print(f"Different pixels: {(diff > 0).sum()} ({(((diff > 0).sum()/(gen_res**2))*100):.1f}%)")
 
-                if view_image or save_image:
-                    plt.figure(figsize=(10, 10))
-                    plt.axis('off')
-                    plt.imshow(result)
-                    if save_image:
-                        plt.savefig('mandelbrotFigure.png', dpi=gen_res/10)
-                    if view_image:
-                        plt.show()
+            # plot the results next to each other
+            if view_image or save_image:
+                # Create subplots
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+                ax1.imshow(func1_result)
+                ax1.set_title(f'{func1.__name__} Result')
+                ax1.axis('off')
+
+                ax2.imshow(func2_result)
+                ax2.set_title(f'{func2.__name__} Result')
+                ax2.axis('off')
+
+                # Show/save the plots
+                plt.tight_layout()
+                if save_image:
+                    plt.savefig('mandelbrotFigure')
+                if view_image:
+                    plt.show()
+
+        # run a single version
+        else:
+            _, result = benchmark(versions[run_version.index(True)], -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+            print('finished version...')
+
+            if view_image or save_image:
+                plt.figure(figsize=(10, 10))
+                plt.axis('off')
+                plt.imshow(result)
+                if save_image:
+                    plt.savefig('mandelbrotFigure.png', dpi=gen_res/10)
+                if view_image:
+                    plt.show()
 
     case 2:
         def test_row(N, A):
@@ -415,5 +424,37 @@ match run_tests:
             out = Path(__file__).parent / 'mandelbrot.png'
             fig.savefig(out, dpi=150)
             print (f'Saved: {out}')
+
+    case 8:
+        if __name__ == '__main__':
+            # --- MP2 M3: benchmark (in __main__ block) ---
+            N, max_iter = 1024, 100
+            X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
+            
+            # Serial baseline (Numba already warm after M1 warm-up)
+            times = []
+            for _ in range(3):
+                t0 = time.perf_counter()
+                mandelbrot_serial(X_MIN, X_MAX, N, Y_MIN, Y_MAX, N, max_iter)
+                times.append(time.perf_counter() - t0)
+            t_serial = statistics.median(times)
+            
+            for n_workers in range(1, os.cpu_count() + 1):
+                chunk_size = max(1, N // n_workers)
+                chunks, row = [], 0
+                while row < N:
+                    end = min(row + chunk_size, N)
+                    chunks.append((row, end, N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter))
+                    row = end
+                with Pool(processes=n_workers) as pool:
+                    pool.map(_worker, chunks) # warm-up: Numba JIT in all workers
+                    times = []
+                    for _ in range(3):
+                        t0 = time.perf_counter()
+                        np.vstack(pool.map(_worker, chunks))
+                        times.append(time.perf_counter() - t0)
+                t_par = statistics.median(times)
+                speedup = t_serial / t_par
+                print(f"{n_workers:2d} workers: {t_par:.3f}s, speedup={speedup:.2f}x, eff={speedup/n_workers*100:.0f}%")
 
 
