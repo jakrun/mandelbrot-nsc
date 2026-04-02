@@ -142,7 +142,7 @@ def compute_mandelbrot_hybrid_numba(x_min, x_max, x_res, y_min, y_max, y_res, ma
 
     return np.rot90(complex_grid)
 
-@njit
+@njit(cache=True)
 def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min, 
                                    y_max, y_res, max_iter, dtype=np.float32):
     """Fully JIT-compiled Mandelbrot --- structure identical to naive."""
@@ -188,7 +188,7 @@ def estimate_pi_parallel(num_samples, num_processes=4):
 
 # MP2 milestone 1
 
-@njit
+@njit(cache=True)
 def mandelbrot_pixel(c_real, c_imag, max_iter):
     z_real = z_imag = 0.0
     for i in range(max_iter):
@@ -199,7 +199,7 @@ def mandelbrot_pixel(c_real, c_imag, max_iter):
         z_real = zr2 - zi2 + c_real
     return max_iter
 
-@njit
+@njit(cache=True)
 def mandelbrot_chunk(row_start, row_end, N, x_min, x_max, y_min, y_max, max_iter):
     out = np.empty((row_end - row_start, N), dtype=np.int32)
     dx = (x_max - x_min) / N
@@ -218,7 +218,7 @@ def mandelbrot_serial(x_min, x_max, N1, y_min, y_max, N2, max_iter):
 def _worker(args):
     return mandelbrot_chunk(*args)
 
-def mandelbrot_parallel(N, x_min, x_max, y_min, y_max, max_iter, n_workers=4):
+def mandelbrot_parallel_old(N, x_min, x_max, y_min, y_max, max_iter, n_workers=4):
     chunk_size = max(1, N // n_workers)
     chunks, row = [], 0
     while row < N:
@@ -232,9 +232,23 @@ def mandelbrot_parallel(N, x_min, x_max, y_min, y_max, max_iter, n_workers=4):
     
     return np.vstack(parts)
 
-# MP2 milestone 3
-
-
+def mandelbrot_parallel(N, x_min, x_max, y_min, y_max, max_iter,
+                         n_workers=4, n_chunks=None, pool=None):
+    if n_chunks is None:
+        n_chunks = n_workers
+    chunk_size = max(1, N // n_chunks)
+    chunks, row = [], 0
+    while row < N:
+        row_end = min(row + chunk_size, N)
+        chunks.append((row, row_end, N, x_min, x_max, y_min, y_max, max_iter))
+        row = row_end
+    if pool is not None: # caller manages Pool; skip startup + warm-up
+        return np.vstack(pool.map(_worker, chunks))
+    tiny = [(0, 8, 8, x_min, x_max, y_min, y_max, max_iter)]
+    with Pool(processes=n_workers) as p:
+        p.map(_worker, tiny) # warm-up: load JIT cache in workers
+        parts = p.map(_worker, chunks)
+    return np.vstack(parts)
 
 # TEST CASES:
     # 0: do nothing
@@ -244,30 +258,33 @@ def mandelbrot_parallel(N, x_min, x_max, y_min, y_max, max_iter, n_workers=4):
     # 4: data type test
     # 5: Monte Carlo pi estimation test
     # 6: Monte Carlo pi estimation test *in parallel*
-    # 7: run the parallel mandelbrot computation and save the image
-    # 8: run the serial mandelbrot computation and save the image
+    # 7: run parallel mandelbrot computation and save the image
+    # 8: analyze performance of parallel mandelbrot, testing optimal number of workers
+    # 8.5: same, but chat version
+    # 9: analyze performance of parallel mandelbrot, testing optimal number of chunks
+    # 9.5: same, but chat version
 
-run_tests = 8
+run_tests = 8.5
 match run_tests:
     case 0: print("Doing nothing...")
     case 1:
         gen_res_list = [128, 256, 512, 1024, 2048, 4096, 4096*2, 4096*4]
-        gen_res = 2048
-        max_iter = 256
-        n_runs = 3
+        gen_res  = 2048
+        max_iter = 100
+        n_runs   = 3
 
         run_naive        = False
         run_numpy        = False
         run_hybrid_numba = False
         run_naive_numba  = False
         run_serial       = False
-        run_parallel     = True
+        run_parallel     = False
 
         run_version = [run_naive,        run_numpy, 
                        run_hybrid_numba, run_naive_numba, 
                        run_serial,       run_parallel]
 
-        view_image = True
+        view_image = False
         save_image = False
         plot_times = False # only use if using gen_res_list
 
@@ -425,7 +442,7 @@ match run_tests:
             fig.savefig(out, dpi=150)
             print (f'Saved: {out}')
 
-    case 8:
+    case 8: # Best time with 15 workers: 0.012s, speedup=4.11x, eff=27%
         if __name__ == '__main__':
             # --- MP2 M3: benchmark (in __main__ block) ---
             N, max_iter = 1024, 100
@@ -439,7 +456,7 @@ match run_tests:
                 times.append(time.perf_counter() - t0)
             t_serial = statistics.median(times)
             
-            for n_workers in range(1, os.cpu_count() + 1):
+            for n_workers in reversed(range(1, os.cpu_count() + 1)):
                 chunk_size = max(1, N // n_workers)
                 chunks, row = [], 0
                 while row < N:
@@ -456,5 +473,117 @@ match run_tests:
                 t_par = statistics.median(times)
                 speedup = t_serial / t_par
                 print(f"{n_workers:2d} workers: {t_par:.3f}s, speedup={speedup:.2f}x, eff={speedup/n_workers*100:.0f}%")
+    
+    case 8.5: # Result differs each time. I think more is better. Sometimes not the case with lower resolution, but definitely at higher ones
+        if __name__ == '__main__':
+            N, max_iter = 1024, 100
+            X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
+            
+            # Serial baseline
+            times = []
+            for _ in range(3):
+                t0 = time.perf_counter()
+                mandelbrot_serial(X_MIN, X_MAX, N, Y_MIN, Y_MAX, N, max_iter)
+                times.append(time.perf_counter() - t0)
+            t_serial = statistics.median(times)
+            
+            results = []
+            for n_workers in range(5, os.cpu_count() + 1):  # Forward iteration
+                chunk_size = max(1, N // n_workers)
+                chunks, row = [], 0
+                while row < N:
+                    end = min(row + chunk_size, N)
+                    chunks.append((row, end, N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter))
+                    row = end
+                
+                with Pool(processes=n_workers) as pool:
+                    pool.map(_worker, chunks)  # warm-up
+                    times = []
+                    for _ in range(3):
+                        t0 = time.perf_counter()
+                        np.vstack(pool.map(_worker, chunks))
+                        times.append(time.perf_counter() - t0)
+                
+                t_par = statistics.median(times)
+                speedup = t_serial / t_par
+                efficiency = speedup / n_workers * 100
+                results.append((n_workers, t_par, speedup, efficiency))
+                print(f"{n_workers:2d} workers: {t_par:.3f}s, speedup={speedup:.2f}x, eff={efficiency:.0f}%")
+            
+            # Find and report optimal configuration
+            best = max(results, key=lambda x: x[2])  # Max by speedup
+            print(f"\nOptimal: {best[0]} workers with {best[2]:.2f}x speedup")
 
+    case 9:
+        if __name__ == '__main__':
+            for n_workers in reversed(range(1, os.cpu_count() + 1)):
+                N, max_iter = 1024, 100
+                # n_workers = 1 # adjust to your L04 optimum 
+                print(f"Testing with {n_workers} workers...")
+                X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
+                
+                mandelbrot_chunk(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter) # warm up JIT
+                
+                # Serial baseline
+                times = []
+                for _ in range(3):
+                    t0 = time.perf_counter()
+                    mandelbrot_chunk(0, N, N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter)
+                    times.append(time.perf_counter() - t0)
+                t_serial = statistics.median(times)
+                print(f"Serial: {t_serial:.3f}s")
+                
+                # Chunk-count sweep (M2): one Pool per config
+                tiny = [(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter)]
+                for mult in [1, 2, 4, 8, 16]:
+                    n_chunks = mult * n_workers
+                    with Pool(processes=n_workers) as pool:
+                        pool.map(_worker, tiny) # warm-up: load JIT cache in workers
+                        times = []
+                        for _ in range(3):
+                            t0 = time.perf_counter()
+                            mandelbrot_parallel(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter, 
+                                                n_workers=n_workers, n_chunks=n_chunks, pool=pool)
+                            times.append(time.perf_counter() - t0)
+                    t_par = statistics.median(times)
+                    lif = n_workers * t_par / t_serial - 1
+                    print(f"{n_chunks:4d} chunks {t_par:.3f}s {t_serial/t_par:.1f}x LIF={lif:.2f}")
+
+    case 9.5:
+        if __name__ == '__main__':
+            for n_workers in reversed(range(1, os.cpu_count() + 1)):
+                time.sleep(30)
+                N, max_iter = 1024, 100
+                print(f"Testing with {n_workers} workers...")
+                X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
+                
+                mandelbrot_chunk(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter)
+                
+                # Serial baseline
+                times = []
+                for _ in range(3):
+                    t0 = time.perf_counter()
+                    mandelbrot_chunk(0, N, N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter)
+                    times.append(time.perf_counter() - t0)
+                t_serial = statistics.median(times)
+                print(f"Serial: {t_serial:.3f}s")
+                
+                # Create ONE pool for this n_workers configuration
+                with Pool(processes=n_workers) as pool:
+                    tiny = [(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter)]
+                    pool.map(_worker, tiny)  # warm-up
+                    
+                    # Chunk-count sweep with the SAME pool
+                    for mult in [1, 2, 4, 8, 16]:
+                        n_chunks = mult * n_workers
+                        times = []
+                        for _ in range(3):
+                            t0 = time.perf_counter()
+                            mandelbrot_parallel(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter, 
+                                                n_workers=n_workers, n_chunks=n_chunks, pool=pool)
+                            times.append(time.perf_counter() - t0)
+                        t_par = statistics.median(times)
+                        lif = n_workers * t_par / t_serial - 1
+                        print(f"{n_chunks:4d} chunks {t_par:.3f}s {t_serial/t_par:.1f}x LIF={lif:.2f}")
+                # Pool exits here only once per n_workers value
 
