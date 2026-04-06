@@ -16,6 +16,9 @@ from multiprocessing import Pool
 import os
 import psutil
 from pathlib import Path
+from dask import delayed
+from dask.distributed import Client, LocalCluster
+import dask
 
 """
 Mandelbrot Set Generator
@@ -232,8 +235,7 @@ def mandelbrot_parallel_old(N, x_min, x_max, y_min, y_max, max_iter, n_workers=4
     
     return np.vstack(parts)
 
-def mandelbrot_parallel(N, x_min, x_max, y_min, y_max, max_iter,
-                         n_workers=4, n_chunks=None, pool=None):
+def mandelbrot_parallel(N, x_min, x_max, y_min, y_max, max_iter, n_workers=4, n_chunks=None, pool=None):
     if n_chunks is None:
         n_chunks = n_workers
     chunk_size = max(1, N // n_chunks)
@@ -250,168 +252,177 @@ def mandelbrot_parallel(N, x_min, x_max, y_min, y_max, max_iter,
         parts = p.map(_worker, chunks)
     return np.vstack(parts)
 
-# TEST CASES:
-    # 0: do nothing
-    # 1: run the functions normally
-    # 2: check performance of row vs col sums for numpy
-    # 3: check the profiles for the original functions
-    # 4: data type test
-    # 5: Monte Carlo pi estimation test
-    # 6: Monte Carlo pi estimation test *in parallel*
-    # 7: run parallel mandelbrot computation and save the image
-    # 8: analyze performance of parallel mandelbrot, testing optimal number of workers
-    # 8.5: same, but chat version
-    # 9: analyze performance of parallel mandelbrot, testing optimal number of chunks
-    # 9.5: same, but chat version
+def mandelbrot_dask(N, x_min, x_max, y_min, y_max, max_iter=100, n_chunks=32):
+    chunk_size = max(1, N // n_chunks)
+    tasks, row = [], 0
+    while row < N:
+        row_end = min(row + chunk_size, N)
+        tasks.append(delayed(mandelbrot_chunk)(row, row_end, N, x_min, x_max, y_min, y_max, max_iter))
+        row = row_end
+    parts = dask.compute(*tasks)
+    return np.vstack(parts)
 
-run_tests = 8.5
-match run_tests:
-    case 0: print("Doing nothing...")
-    case 1:
-        gen_res_list = [128, 256, 512, 1024, 2048, 4096, 4096*2, 4096*4]
-        gen_res  = 2048
-        max_iter = 100
-        n_runs   = 3
+if __name__ == '__main__':
+    """ TEST CASES: 
+         0: do nothing
+         1: run the functions normally
+         2: check performance of row vs col sums for numpy
+         3: check the profiles for the original functions
+         4: data type test
+         5: Monte Carlo pi estimation test
+         6: Monte Carlo pi estimation test *in parallel*
+         7: run parallel mandelbrot computation and save the image
+         8: analyze performance of parallel mandelbrot, testing optimal number of workers
+         9: same, but chat version
+        10: analyze performance of parallel mandelbrot, testing optimal number of chunks
+        11: exhaustive chunk and worker test (doesn't work well)
+        12: test dask distributed
+        13: test mandelbrot_dask
+        14: sweep chunk size for dask implementation
+    """
+    run_tests = 14
+    match run_tests:
+        case 0: print("Doing nothing...")
+        case 1:
+            gen_res_list = [128, 256, 512, 1024, 2048, 4096, 4096*2, 4096*4]
+            gen_res  = 2048
+            max_iter = 100
+            n_runs   = 3
 
-        run_naive        = False
-        run_numpy        = False
-        run_hybrid_numba = False
-        run_naive_numba  = False
-        run_serial       = False
-        run_parallel     = False
+            run_naive        = False
+            run_numpy        = False
+            run_hybrid_numba = False
+            run_naive_numba  = False
+            run_serial       = False
+            run_parallel     = False
 
-        run_version = [run_naive,        run_numpy, 
-                       run_hybrid_numba, run_naive_numba, 
-                       run_serial,       run_parallel]
+            run_version = [run_naive,        run_numpy, 
+                        run_hybrid_numba, run_naive_numba, 
+                        run_serial,       run_parallel]
 
-        view_image = False
-        save_image = False
-        plot_times = False # only use if using gen_res_list
+            view_image = False
+            save_image = False
+            plot_times = False # only use if using gen_res_list
 
-        versions = [compute_mandelbrot_naive, compute_mandelbrot_numpy, 
-                    compute_mandelbrot_hybrid_numba, compute_mandelbrot_naive_numba, 
-                    mandelbrot_serial, mandelbrot_parallel]
-        # run all the functions (idk what the point of this is)
-        if run_version.count(False) == 0:
-            for func in versions:
-                _, _ = benchmark(func, -2, 1, gen_res, -1.5, 1.5, gen_res, 
-                                 max_iter, n_runs=n_runs)
+            versions = [compute_mandelbrot_naive, compute_mandelbrot_numpy, 
+                        compute_mandelbrot_hybrid_numba, compute_mandelbrot_naive_numba, 
+                        mandelbrot_serial, mandelbrot_parallel]
+            # run all the functions (idk what the point of this is)
+            if run_version.count(False) == 0:
+                for func in versions:
+                    _, _ = benchmark(func, -2, 1, gen_res, -1.5, 1.5, gen_res, 
+                                    max_iter, n_runs=n_runs)
 
-        # compare the first two versions
-        elif run_version.count(True) > 1:
-            func1 = None
-            func2 = None
-            for i in range(len(run_version)):
-                if run_version[i] and func1 == None:
-                    func1 = versions[i]
-                elif run_version[i] and func2 == None:
-                    func2 = versions[i]
+            # compare the first two versions
+            elif run_version.count(True) > 1:
+                func1 = None
+                func2 = None
+                for i in range(len(run_version)):
+                    if run_version[i] and func1 == None:
+                        func1 = versions[i]
+                    elif run_version[i] and func2 == None:
+                        func2 = versions[i]
 
-            _, func1_result = benchmark(func1, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-            _, func2_result = benchmark(func2, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-            
-            # check the strict numerical difference between the results
-            if np.allclose(func1_result, func2_result):
-                print("Results match!")
+                _, func1_result = benchmark(func1, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+                _, func2_result = benchmark(func2, -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+                
+                # check the strict numerical difference between the results
+                if np.allclose(func1_result, func2_result):
+                    print("Results match!")
+                else:
+                    print("Results differ!")
+                    diff = np.abs(func1_result - func2_result)
+                    print(f"Max difference: {diff.max()}")
+                    print(f"Different pixels: {(diff > 0).sum()} ({(((diff > 0).sum()/(gen_res**2))*100):.1f}%)")
+
+                # plot the results next to each other
+                if view_image or save_image:
+                    # Create subplots
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+                    ax1.imshow(func1_result)
+                    ax1.set_title(f'{func1.__name__} Result')
+                    ax1.axis('off')
+
+                    ax2.imshow(func2_result)
+                    ax2.set_title(f'{func2.__name__} Result')
+                    ax2.axis('off')
+
+                    # Show/save the plots
+                    plt.tight_layout()
+                    if save_image:
+                        plt.savefig('mandelbrotFigure')
+                    if view_image:
+                        plt.show()
+
+            # run a single version
             else:
-                print("Results differ!")
-                diff = np.abs(func1_result - func2_result)
-                print(f"Max difference: {diff.max()}")
-                print(f"Different pixels: {(diff > 0).sum()} ({(((diff > 0).sum()/(gen_res**2))*100):.1f}%)")
+                _, result = benchmark(versions[run_version.index(True)], -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
+                print('finished version...')
 
-            # plot the results next to each other
-            if view_image or save_image:
-                # Create subplots
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+                if view_image or save_image:
+                    plt.figure(figsize=(10, 10))
+                    plt.axis('off')
+                    plt.imshow(result)
+                    if save_image:
+                        plt.savefig('mandelbrotFigure.png', dpi=gen_res/10)
+                    if view_image:
+                        plt.show()
+        case 2:
+            def test_row(N, A):
+                for i in range(N): s = np.sum(A[i, :])
+                return None
 
-                ax1.imshow(func1_result)
-                ax1.set_title(f'{func1.__name__} Result')
-                ax1.axis('off')
+            def test_col(N, A):
+                for j in range(N): s = np.sum(A[:, j])
+                return None
 
-                ax2.imshow(func2_result)
-                ax2.set_title(f'{func2.__name__} Result')
-                ax2.axis('off')
+            N = 10000
+            A = np.random.rand(N, N)
+            A_f = np.asfortranarray(A)
+            n_runs = 3
+            print('With standard np.array ...')
+            _, _ = benchmark(test_row, N, A, n_runs=n_runs)
+            _, _ = benchmark(test_col, N, A, n_runs=n_runs)
+            print('With fortran np.array ...')
+            _, _ = benchmark(test_row, N, A_f, n_runs=n_runs)
+            _, _ = benchmark(test_col, N, A_f, n_runs=n_runs)
+        case 3:
+            # x_min, x_max, x_res, y_min, y_max, y_res, max_iter
+            cProfile.run('compute_mandelbrot_naive(-2, 1, 512, -1.5, 1.5, 512, 100)', 'naive_profile.prof')
+            cProfile.run('compute_mandelbrot_numpy(-2, 1, 512, -1.5, 1.5, 512, 100)', 'numpy_profile.prof')
 
-                # Show/save the plots
-                plt.tight_layout()
-                if save_image:
-                    plt.savefig('mandelbrotFigure')
-                if view_image:
-                    plt.show()
+            for name in ('naive_profile.prof', 'numpy_profile.prof'):
+                stats = pstats.Stats(name)
+                stats.sort_stats('cumulative')
+                stats.print_stats(10)
+        case 4:
+            # for dtype in [np.float32, np.float64]:
+            #     print(f'running with precision {dtype}')
+            #     _, _ = benchmark(compute_mandelbrot_naive_numba, -2, 1, 2048, -1.5, 1.5, 2048, 100, dtype)
 
-        # run a single version
-        else:
-            _, result = benchmark(versions[run_version.index(True)], -2, 1, gen_res, -1.5, 1.5, gen_res, max_iter, n_runs=n_runs)
-            print('finished version...')
-
-            if view_image or save_image:
-                plt.figure(figsize=(10, 10))
-                plt.axis('off')
-                plt.imshow(result)
-                if save_image:
-                    plt.savefig('mandelbrotFigure.png', dpi=gen_res/10)
-                if view_image:
-                    plt.show()
-
-    case 2:
-        def test_row(N, A):
-            for i in range(N): s = np.sum(A[i, :])
-            return None
-
-        def test_col(N, A):
-            for j in range(N): s = np.sum(A[:, j])
-            return None
-
-        N = 10000
-        A = np.random.rand(N, N)
-        A_f = np.asfortranarray(A)
-        n_runs = 3
-        print('With standard np.array ...')
-        _, _ = benchmark(test_row, N, A, n_runs=n_runs)
-        _, _ = benchmark(test_col, N, A, n_runs=n_runs)
-        print('With fortran np.array ...')
-        _, _ = benchmark(test_row, N, A_f, n_runs=n_runs)
-        _, _ = benchmark(test_col, N, A_f, n_runs=n_runs)
-
-    case 3:
-        # x_min, x_max, x_res, y_min, y_max, y_res, max_iter
-        cProfile.run('compute_mandelbrot_naive(-2, 1, 512, -1.5, 1.5, 512, 100)', 'naive_profile.prof')
-        cProfile.run('compute_mandelbrot_numpy(-2, 1, 512, -1.5, 1.5, 512, 100)', 'numpy_profile.prof')
-
-        for name in ('naive_profile.prof', 'numpy_profile.prof'):
-            stats = pstats.Stats(name)
-            stats.sort_stats('cumulative')
-            stats.print_stats(10)
-
-    case 4:
-        # for dtype in [np.float32, np.float64]:
-        #     print(f'running with precision {dtype}')
-        #     _, _ = benchmark(compute_mandelbrot_naive_numba, -2, 1, 2048, -1.5, 1.5, 2048, 100, dtype)
-
-        # r16 = compute_mandelbrot_naive_numba(-2, 1, 1024, -1.5, 1.5, 1024, dtype = np.float16)
-        r32 = compute_mandelbrot_naive_numba(-2, 1, 2048, -1.5, 1.5, 2048, 100, dtype = np.float32)
-        r64 = compute_mandelbrot_naive_numba(-2, 1, 2048, -1.5, 1.5, 2048, 100, dtype = np.float64)
-        fig, axes = plt.subplots(1, 2, figsize=(12,4))
-        for ax, result, title in zip(axes, [r32, r64],  ['float32', 'float64 (ref)']):
-            ax.imshow(result, cmap='hot')
-            ax.set_title(title); ax.axis('off')
-        plt.savefig('precision_comparison.png', dpi=150)
-        print(f"Max diff float32 vs float64: {np.abs(r32 - r64).max()}")
-        # print(f"Max diff float16 vs float64: {np.abs(r16 - r64).max()}")
-
-    case 5:
-        # First we check how long it takes to run the naive Monte Carlo with 
-        # 10,000,000 samples
-        num_samples = 10**7
-        _, pi_estimate = benchmark(estimate_pi_serial, num_samples)
-        print(f"Estimated pi with {num_samples} \
-              samples: {pi_estimate} \
-                (error: {abs(pi_estimate-math.pi):.6f})")
-
-    case 6:
-        # Now we do the same but for parellel computing for every number of 
-        # worker-count from 1 to cpu_count()
-        if __name__ == '__main__':
+            # r16 = compute_mandelbrot_naive_numba(-2, 1, 1024, -1.5, 1.5, 1024, dtype = np.float16)
+            r32 = compute_mandelbrot_naive_numba(-2, 1, 2048, -1.5, 1.5, 2048, 100, dtype = np.float32)
+            r64 = compute_mandelbrot_naive_numba(-2, 1, 2048, -1.5, 1.5, 2048, 100, dtype = np.float64)
+            fig, axes = plt.subplots(1, 2, figsize=(12,4))
+            for ax, result, title in zip(axes, [r32, r64],  ['float32', 'float64 (ref)']):
+                ax.imshow(result, cmap='hot')
+                ax.set_title(title); ax.axis('off')
+            plt.savefig('precision_comparison.png', dpi=150)
+            print(f"Max diff float32 vs float64: {np.abs(r32 - r64).max()}")
+            # print(f"Max diff float16 vs float64: {np.abs(r16 - r64).max()}")
+        case 5:
+            # First we check how long it takes to run the naive Monte Carlo with 
+            # 10,000,000 samples
+            num_samples = 10**7
+            _, pi_estimate = benchmark(estimate_pi_serial, num_samples)
+            print(f"Estimated pi with {num_samples} \
+                samples: {pi_estimate} \
+                    (error: {abs(pi_estimate-math.pi):.6f})")
+        case 6:
+            # Now we do the same but for parellel computing for every number of 
+            # worker-count from 1 to cpu_count()
+            # if __name__ == '__main__':
             num_samples = 10**7
             worker_times = {}
             for num_proc in range(1, os.cpu_count() + 1):
@@ -426,11 +437,10 @@ match run_tests:
                 speed_up = worker_times[1] / t if num_proc > 1 else 1
                 efficiency = (speed_up / num_proc)*100
                 print(f'{num_proc:2d} workers | \
-{t:.3f}s | {speed_up:.2f}x | \
-{efficiency:.1f}%')
-
-    case 7:
-        if __name__ == '__main__':
+    {t:.3f}s | {speed_up:.2f}x | \
+    {efficiency:.1f}%')
+        case 7:
+            # if __name__ == '__main__':
             result = mandelbrot_parallel(1024, -2.5, 1.0, -1.25, 1.25, 100, n_workers=4)
             
             fig, ax = plt.subplots(figsize=(8, 6))
@@ -441,9 +451,8 @@ match run_tests:
             out = Path(__file__).parent / 'mandelbrot.png'
             fig.savefig(out, dpi=150)
             print (f'Saved: {out}')
-
-    case 8: # Best time with 15 workers: 0.012s, speedup=4.11x, eff=27%
-        if __name__ == '__main__':
+        case 8: # Best time with 15 workers: 0.012s, speedup=4.11x, eff=27%
+            # if __name__ == '__main__':
             # --- MP2 M3: benchmark (in __main__ block) ---
             N, max_iter = 1024, 100
             X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
@@ -473,9 +482,8 @@ match run_tests:
                 t_par = statistics.median(times)
                 speedup = t_serial / t_par
                 print(f"{n_workers:2d} workers: {t_par:.3f}s, speedup={speedup:.2f}x, eff={speedup/n_workers*100:.0f}%")
-    
-    case 8.5: # Result differs each time. I think more is better. Sometimes not the case with lower resolution, but definitely at higher ones
-        if __name__ == '__main__':
+        case 9: # Result differs each time. I think more is better. Sometimes not the case with lower resolution, but definitely at higher ones
+            # if __name__ == '__main__':
             N, max_iter = 1024, 100
             X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
             
@@ -513,44 +521,39 @@ match run_tests:
             # Find and report optimal configuration
             best = max(results, key=lambda x: x[2])  # Max by speedup
             print(f"\nOptimal: {best[0]} workers with {best[2]:.2f}x speedup")
-
-    case 9:
-        if __name__ == '__main__':
-            for n_workers in reversed(range(1, os.cpu_count() + 1)):
-                N, max_iter = 1024, 100
-                # n_workers = 1 # adjust to your L04 optimum 
-                print(f"Testing with {n_workers} workers...")
-                X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
-                
-                mandelbrot_chunk(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter) # warm up JIT
-                
-                # Serial baseline
-                times = []
-                for _ in range(3):
-                    t0 = time.perf_counter()
-                    mandelbrot_chunk(0, N, N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter)
-                    times.append(time.perf_counter() - t0)
-                t_serial = statistics.median(times)
-                print(f"Serial: {t_serial:.3f}s")
-                
-                # Chunk-count sweep (M2): one Pool per config
-                tiny = [(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter)]
-                for mult in [1, 2, 4, 8, 16]:
-                    n_chunks = mult * n_workers
-                    with Pool(processes=n_workers) as pool:
-                        pool.map(_worker, tiny) # warm-up: load JIT cache in workers
-                        times = []
-                        for _ in range(3):
-                            t0 = time.perf_counter()
-                            mandelbrot_parallel(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter, 
-                                                n_workers=n_workers, n_chunks=n_chunks, pool=pool)
-                            times.append(time.perf_counter() - t0)
-                    t_par = statistics.median(times)
-                    lif = n_workers * t_par / t_serial - 1
-                    print(f"{n_chunks:4d} chunks {t_par:.3f}s {t_serial/t_par:.1f}x LIF={lif:.2f}")
-
-    case 9.5:
-        if __name__ == '__main__':
+        case 10: # best lif score with 8 workers and 64 chunks: 0.042s, LIF=0.73, speedup=4.6x, (with 2048x2048)
+            # if __name__ == '__main__':
+            N, max_iter = 1024*2, 100
+            n_workers = 8 # adjust to your L04 optimum
+            X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
+            
+            mandelbrot_chunk(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter) # warm up JIT
+            
+            # Serial baseline
+            times = []
+            for _ in range(3):
+                t0 = time.perf_counter()
+                mandelbrot_chunk(0, N, N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter)
+                times.append(time.perf_counter() - t0)
+            t_serial = statistics.median(times)
+            print(f"Serial: {t_serial:.3f}s")
+            
+            # Chunk-count sweep (M2): one Pool per config
+            tiny = [(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter)]
+            for mult in [1, 2, 4, 8, 16]:
+                n_chunks = mult * n_workers
+                with Pool(processes=n_workers) as pool:
+                    pool.map(_worker, tiny) # warm-up: load JIT cache in workers
+                    times = []
+                    for _ in range(3):
+                        t0 = time.perf_counter()
+                        mandelbrot_parallel(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter, n_workers=n_workers, n_chunks=n_chunks, pool=pool)
+                        times.append(time.perf_counter() - t0)
+                t_par = statistics.median(times)
+                lif = n_workers * t_par / t_serial - 1
+                print(f"{n_chunks:4d} chunks {t_par:.3f}s {t_serial/t_par:.1f}x LIF={lif:.2f}")
+        case 11:
+            # if __name__ == '__main__':
             for n_workers in reversed(range(1, os.cpu_count() + 1)):
                 time.sleep(30)
                 N, max_iter = 1024, 100
@@ -586,4 +589,46 @@ match run_tests:
                         lif = n_workers * t_par / t_serial - 1
                         print(f"{n_chunks:4d} chunks {t_par:.3f}s {t_serial/t_par:.1f}x LIF={lif:.2f}")
                 # Pool exits here only once per n_workers value
+        case 12:
+            from dask.distributed import Client, LocalCluster
+            cluster = LocalCluster(n_workers=4, threads_per_worker=1)
+            client = Client(cluster)
+            print(client.dashboard_link)   # should print a localhost URL
+            client.close(); cluster.close()
+        case 13:
+            N, max_iter = 1024*2, 100
+            X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
+            cluster = LocalCluster(n_workers=8, threads_per_worker=1)
+            client = Client(cluster)
+            client.run(lambda: mandelbrot_chunk(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, 10)) # warm up all workers
+            times = []
+            for _ in range(3):
+                t0 = time.perf_counter()
+                result = mandelbrot_dask(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter=max_iter)
+                times.append(time.perf_counter() - t0)
+            print(f"Dask local (n_chunks=32): {statistics.median(times):.3f} s")
+            client.close(); cluster.close()
+        case 14: # best lif score with 8 chunks: 0.111s, LIF=2.31, speedup=2.4x, (with 2048x2048)
+            N, max_iter = 1024*2, 100
+            n_workers = 8 # adjust to your L04 optimum
+            X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
+            
+            cluster = LocalCluster(n_workers=n_workers, threads_per_worker=1)
+            client = Client(cluster)
+            client.run(lambda: mandelbrot_chunk(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, 10)) # warm up all workers
 
+            for n_chunks in [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256]:
+                time.sleep(5)
+                _ = mandelbrot_dask(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter=max_iter, n_chunks=n_chunks)
+                times = []
+                for _ in range(3):
+                    t0 = time.perf_counter()
+                    result = mandelbrot_dask(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter=max_iter, n_chunks=n_chunks)
+                    times.append(time.perf_counter() - t0)
+                t_cur = statistics.median(times)
+                if n_chunks == 1:
+                    t_1x = t_cur
+                lif = n_workers * t_cur / t_1x - 1
+                print(f"{n_chunks:4d} chunks | {t_cur:.3f}s | {t_1x/t_cur:.1f}x | LIF={lif:.2f}")
+            client.close(); cluster.close()
+            
