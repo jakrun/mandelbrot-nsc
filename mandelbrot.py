@@ -164,7 +164,7 @@ def compute_mandelbrot_naive_numba(x_min, x_max, x_res, y_min,
             result [i, j] = n
     return result
 
-# MP2 exercises 1-3
+# MP2
 
 def estimate_pi_serial(num_samples):
     inside_circle = 0
@@ -188,8 +188,6 @@ def estimate_pi_parallel(num_samples, num_processes=4):
     with Pool(processes=num_processes) as pool:
         results = pool.map(estimate_pi_chunk, tasks)
     return 4 * sum(results) / num_samples
-
-# MP2 milestone 1
 
 @njit(cache=True)
 def mandelbrot_pixel(c_real, c_imag, max_iter):
@@ -215,8 +213,6 @@ def mandelbrot_chunk(row_start, row_end, N, x_min, x_max, y_min, y_max, max_iter
 
 def mandelbrot_serial(x_min, x_max, N1, y_min, y_max, N2, max_iter):
     return mandelbrot_chunk(0, N1, N2, x_min, x_max, y_min, y_max, max_iter)
-
-# MP2 milestone 2
 
 def _worker(args):
     return mandelbrot_chunk(*args)
@@ -279,9 +275,10 @@ if __name__ == '__main__':
         12: test dask distributed
         13: test mandelbrot_dask
         14: sweep chunk size for dask implementation
+        15: test mandelbrot_dask using strato
     """
-    run_tests = 14
-    match run_tests:
+    test_case = 15
+    match test_case:
         case 0: print("Doing nothing...")
         case 1:
             gen_res_list = [128, 256, 512, 1024, 2048, 4096, 4096*2, 4096*4]
@@ -608,8 +605,10 @@ if __name__ == '__main__':
                 times.append(time.perf_counter() - t0)
             print(f"Dask local (n_chunks=32): {statistics.median(times):.3f} s")
             client.close(); cluster.close()
-        case 14: # best lif score with 8 chunks: 0.111s, LIF=2.31, speedup=2.4x, (with 2048x2048)
-            N, max_iter = 1024*2, 100
+        case 14: # best lif scores... 
+            # with  8 chunks: 0.111s, LIF=2.31, speedup=2.4x, (with 2048x2048)
+            # with 48 chunks: 0.306s, LIF=1.73, speedup=2.9x, (with 4096x4096)
+            N, max_iter = 1024*4, 100
             n_workers = 8 # adjust to your L04 optimum
             X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
             
@@ -631,4 +630,23 @@ if __name__ == '__main__':
                 lif = n_workers * t_cur / t_1x - 1
                 print(f"{n_chunks:4d} chunks | {t_cur:.3f}s | {t_1x/t_cur:.1f}x | LIF={lif:.2f}")
             client.close(); cluster.close()
-            
+        case 15:
+            N, max_iter = 1024*2, 100
+            n_chunks = 8
+            X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
+            # Remove these two lines:
+            # cluster = LocalCluster(n_workers=8, threads_per_worker=1)
+            # client = Client(cluster)
+            # Replace with:
+            client = Client("tcp://10.92.1.74:8786")
+
+            client.run(lambda: mandelbrot_chunk(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, 10)) # warm up all workers
+            times = []
+            for _ in range(3):
+                t0 = time.perf_counter()
+                result = mandelbrot_dask(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter=max_iter, n_chunks=n_chunks)
+                times.append(time.perf_counter() - t0)
+            print(f"Dask strato (n_chunks={n_chunks}): {statistics.median(times):.3f} s")
+            client.close() # keep this
+            # cluster.close() # remove this
+
