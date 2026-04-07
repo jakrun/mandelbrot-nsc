@@ -658,6 +658,8 @@ if __name__ == '__main__':
 
             # Replace with:
             client = Client("tcp://10.92.1.74:8786")
+            versions = client.run(lambda: __import__('dask').__version__)
+            print(versions)   # all values must be identical
 
             client.run(lambda: mandelbrot_chunk(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, 10)) # warm up all workers
 
@@ -682,7 +684,5 @@ if __name__ == '__main__':
             optimal_lif = results[optimal_n_chunks]
             print(f"\nOptimal n_chunks: {optimal_n_chunks} with minimum LIF score: {optimal_lif:.3f}")
             client.close() # keep this
-        case 17:
-            versions = client.run(lambda: __import__('dask').__version__)
-            print(versions)   # all values must be identical
+
 
