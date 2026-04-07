@@ -276,8 +276,10 @@ if __name__ == '__main__':
         13: test mandelbrot_dask
         14: sweep chunk size for dask implementation
         15: test mandelbrot_dask using strato
+        16: sweep chunk size for strato implementation
+        17: smoke test
     """
-    test_case = 15
+    test_case = 17
     match test_case:
         case 0: print("Doing nothing...")
         case 1:
@@ -594,6 +596,7 @@ if __name__ == '__main__':
             client.close(); cluster.close()
         case 13:
             N, max_iter = 1024*2, 100
+            n_chunks = 8
             X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
             cluster = LocalCluster(n_workers=8, threads_per_worker=1)
             client = Client(cluster)
@@ -601,9 +604,9 @@ if __name__ == '__main__':
             times = []
             for _ in range(3):
                 t0 = time.perf_counter()
-                result = mandelbrot_dask(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter=max_iter)
+                result = mandelbrot_dask(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter=max_iter, n_chunks=n_chunks)
                 times.append(time.perf_counter() - t0)
-            print(f"Dask local (n_chunks=32): {statistics.median(times):.3f} s")
+            print(f"Dask local (n_chunks={n_chunks}): {statistics.median(times):.3f} s")
             client.close(); cluster.close()
         case 14: # best lif scores... 
             # with  8 chunks: 0.111s, LIF=2.31, speedup=2.4x, (with 2048x2048)
@@ -649,4 +652,37 @@ if __name__ == '__main__':
             print(f"Dask strato (n_chunks={n_chunks}): {statistics.median(times):.3f} s")
             client.close() # keep this
             # cluster.close() # remove this
+        case 16:
+            N, max_iter = 1024*4, 100
+            X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
+
+            # Replace with:
+            client = Client("tcp://10.92.1.74:8786")
+
+            client.run(lambda: mandelbrot_chunk(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, 10)) # warm up all workers
+
+            # Sweep n_chunks to find optimal value
+            n_chunks_values = [2, 4, 8, 16, 32, 64, 128, 256, 512]
+            results = {}
+
+            for n_chunks in n_chunks_values:
+                times = []
+                for _ in range(3):
+                    t0 = time.perf_counter()
+                    result = mandelbrot_dask(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter=max_iter, n_chunks=n_chunks)
+                    times.append(time.perf_counter() - t0)
+                
+                median_time = statistics.median(times)
+                lif_score = median_time * n_chunks  # LIF = Latency × Items per Batch (or similar metric)
+                results[n_chunks] = lif_score
+                print(f"Dask strato (n_chunks={n_chunks}): median_time={median_time:.3f} s, LIF score={lif_score:.3f}")
+
+            # Find optimal n_chunks (minimum LIF score)
+            optimal_n_chunks = min(results, key=results.get)
+            optimal_lif = results[optimal_n_chunks]
+            print(f"\nOptimal n_chunks: {optimal_n_chunks} with minimum LIF score: {optimal_lif:.3f}")
+            client.close() # keep this
+        case 17:
+            versions = client.run(lambda: __import__('dask').__version__)
+            print(versions)   # all values must be identical
 
