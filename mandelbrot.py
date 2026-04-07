@@ -279,7 +279,7 @@ if __name__ == '__main__':
         16: sweep chunk size for strato implementation
         17: smoke test
     """
-    test_case = 17
+    test_case = 16
     match test_case:
         case 0: print("Doing nothing...")
         case 1:
@@ -655,34 +655,37 @@ if __name__ == '__main__':
         case 16:
             N, max_iter = 1024*4, 100
             X_MIN, X_MAX, Y_MIN, Y_MAX = -2.5, 1.0, -1.25, 1.25
+            n_workers = 4  # adjust to your optimum
 
-            # Replace with:
             client = Client("tcp://10.92.1.74:8786")
             versions = client.run(lambda: __import__('dask').__version__)
             print(versions)   # all values must be identical
-
             client.run(lambda: mandelbrot_chunk(0, 8, 8, X_MIN, X_MAX, Y_MIN, Y_MAX, 10)) # warm up all workers
 
-            # Sweep n_chunks to find optimal value
-            n_chunks_values = [2, 4, 8, 16, 32, 64, 128, 256, 512]
+            t_1x = None
             results = {}
 
-            for n_chunks in n_chunks_values:
+            for n_chunks in [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024]:
+                time.sleep(5)
+                _ = mandelbrot_dask(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter=max_iter, n_chunks=n_chunks)
                 times = []
                 for _ in range(3):
                     t0 = time.perf_counter()
                     result = mandelbrot_dask(N, X_MIN, X_MAX, Y_MIN, Y_MAX, max_iter=max_iter, n_chunks=n_chunks)
                     times.append(time.perf_counter() - t0)
-                
-                median_time = statistics.median(times)
-                lif_score = median_time * n_chunks  # LIF = Latency × Items per Batch (or similar metric)
-                results[n_chunks] = lif_score
-                print(f"Dask strato (n_chunks={n_chunks}): median_time={median_time:.3f} s, LIF score={lif_score:.3f}")
+                t_cur = statistics.median(times)
+                if n_chunks == 1:
+                    t_1x = t_cur
+                lif = n_workers * t_cur / t_1x - 1
+                speedup = t_1x / t_cur
+                results[n_chunks] = lif
+                print(f"{n_chunks:4d} chunks | {t_cur:.3f}s | {speedup:.1f}x | LIF={lif:.2f}")
 
             # Find optimal n_chunks (minimum LIF score)
             optimal_n_chunks = min(results, key=results.get)
             optimal_lif = results[optimal_n_chunks]
-            print(f"\nOptimal n_chunks: {optimal_n_chunks} with minimum LIF score: {optimal_lif:.3f}")
+            print(f"\nOptimal n_chunks: {optimal_n_chunks} with minimum LIF: {optimal_lif:.2f}")
+
             client.close() # keep this
 
 
